@@ -12,7 +12,6 @@ public:
      */
     static bool TryCallUFunction(UObject* Caller, const TCHAR* FuncName, void* Args);
 
-protected:
     /**
      *  @param Caller UFunction owner
      *  @param FuncName UFunction name

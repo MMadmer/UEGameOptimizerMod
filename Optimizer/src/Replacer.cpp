@@ -2,6 +2,7 @@
 #include <UObjectGlobals.hpp>
 #include <Unreal/UObject.hpp>
 #include <GameplayStatics.hpp>
+#include <Constructs/Views/EnumerateView.hpp>
 
 #include "BPMacros.hpp"
 #include "UActorComponent.hpp"
@@ -65,8 +66,12 @@ void Replacer::ConvertMeshToHism()
 
     AActor* MainMeshActor = nullptr;
     Unreal::TArray<FUniqueMesh> UniqueMeshes;
+    Unreal::TArray<UActorComponent*> UniqueHismArray;
+    int32 HismInstances = 0;
     Unreal::TArray<AActor*> MeshActors;
     UGameplayStatics::GetAllActorsOfClass(ContextActor, MeshActorClass, MeshActors);
+
+    Output::send<LogLevel::Default>(STR("[Optimizer] Static mesh actors before optimizing: {}\n"), MeshActors.Num());
 
     for (const auto& MeshActor : MeshActors)
     {
@@ -77,65 +82,111 @@ void Replacer::ConvertMeshToHism()
         if (!StaticMesh) continue;
 
         if (!MainMeshActor) MainMeshActor = MeshActor;
+        if (MeshActor == MainMeshActor) continue;
 
-        // Find unique meshes
+        // Find unique mesh
         FUniqueMesh UniqueMesh{StaticMesh, Unreal::TArray<UObject*>()};
+        FGetMaterials GetMaterialsArgs{};
+        UFunctionUtils::TryCallUFunction(MeshComponents[0], STR("GetMaterials"), &GetMaterialsArgs);
         bool IsValidMaterials = true;
-        for (const auto& Material : *StaticMesh->GetValuePtrByPropertyName<Unreal::TArray<GUI::Dumpers::FStaticMaterial_420AndBelow>>(STR("StaticMaterials")))
+        for (const auto& Material : GetMaterialsArgs.ReturnValue)
         {
-            if (Material.MaterialInterface)
+            if (Material)
             {
                 FGetBaseMaterial BaseMaterialArgs{};
-                UFunctionUtils::TryCallUFunction(Material.MaterialInterface, STR("GetBaseMaterial"), &BaseMaterialArgs);
+                UFunctionUtils::TryCallUFunction(Material, STR("GetBaseMaterial"), &BaseMaterialArgs);
                 if (BaseMaterialArgs.ReturnValue)
                 {
-                    if (!static_cast<bool>(*BaseMaterialArgs.ReturnValue->GetValuePtrByPropertyName<uint8>(STR("bUsedWithInstancedStaticMeshes"))))
+                    if (!static_cast<bool>(*BaseMaterialArgs.ReturnValue->GetValuePtrByPropertyNameInChain<uint8>(STR("bUsedWithInstancedStaticMeshes"))))
                     {
                         IsValidMaterials = false;
                         break;
                     }
                 }
             }
-            UniqueMesh.Materials.Add(Material.MaterialInterface);
+            UniqueMesh.Materials.Add(Material);
         }
         if (!IsValidMaterials) continue;
 
-        UniqueMeshes.AddUnique(UniqueMesh);
-        Output::send<LogLevel::Default>(STR("[Optimizer] UniqueMeshes: {}\n"), UniqueMeshes.Num());
-    }
+        // Add unique mesh and unique HISM to arrays
+        if (UniqueMeshes.Find(UniqueMesh) < 0)
+        {
+            // Create new unique HISM
+            FAddComponentByClass ComponentArgs{HismClass, false, FTransform(), false};
+            ComponentArgs.Transform.GetScale3D() = FVector(1.0f, 1.0f, 1.0f);
+            UFunctionUtils::TryCallUFunction(MainMeshActor, STR("AddComponentByClass"), &ComponentArgs);
 
-    MeshActors.Empty();
-    UGameplayStatics::GetAllActorsOfClass(ContextActor, MeshActorClass, MeshActors);
+            // Set normal component scale
+            FSetWorldScale3D Scale3D{FVector(1.0f, 1.0f, 1.0f)};
+            UFunctionUtils::TryCallUFunction(ComponentArgs.ReturnValue, STR("SetWorldScale3D"), &Scale3D);
 
-    for (const auto& MeshActor : MeshActors)
-    {
-        const Unreal::TArray<UObject*>& MeshComponents = MeshActor->GetComponentsByClass(MeshCompClass);
-        if (!MeshComponents.IsValidIndex(0)) continue;
+            // Set component static mesh
+            FSetMesh Params{StaticMesh};
+            UFunctionUtils::TryCallUFunction(ComponentArgs.ReturnValue, STR("SetStaticMesh"), &Params);
 
-        UObject* StaticMesh = *MeshComponents[0]->GetValuePtrByPropertyNameInChain<UObject*>(STR("StaticMesh"));
-        if (!StaticMesh) continue;
+            // Set component materials
+            for (const auto& [Material, MaterialIndex] : UniqueMesh.Materials | views::enumerate)
+            {
+                FSetMaterial SetMaterialArgs{static_cast<int32>(MaterialIndex), Material};
+                UFunctionUtils::TryCallUFunction(ComponentArgs.ReturnValue, STR("SetMaterial"), &SetMaterialArgs);
+            }
 
-        // Create new HISM and add to main mesh actor
-        FAddComponentByClass ComponentArgs{HismClass, false, FTransform(), false};
-        ComponentArgs.Transform.GetScale3D() = FVector(1.0f, 1.0f, 1.0f);
-        UFunctionUtils::TryCallUFunction(MainMeshActor, STR("AddComponentByClass"), &ComponentArgs);
-        UActorComponent* NewHism = ComponentArgs.NewComponent;
+            // Apply visibility
+            FIsVisible IsVisibleArgs{};
+            UFunctionUtils::TryCallUFunction(MeshComponents[0], STR("IsVisible"), &IsVisibleArgs);
 
-        FSetWorldScale3D Scale3D{FVector(1.0f, 1.0f, 1.0f)};
-        UFunctionUtils::TryCallUFunction(NewHism, STR("SetWorldScale3D"), &Scale3D);
+            if (!IsVisibleArgs.ReturnValue || static_cast<bool>(*MeshActor->GetValuePtrByPropertyNameInChain<uint8>(STR("bHidden"))))
+            {
+                FSetVisibility SetVisibilityArgs{false, true};
+                UFunctionUtils::TryCallUFunction(ComponentArgs.ReturnValue, STR("SetVisibility"), &SetVisibilityArgs);
+            }
 
-        FSetMesh Params{StaticMesh};
-        UFunctionUtils::TryCallUFunction(NewHism, STR("SetStaticMesh"), &Params);
+            // Apply collision profile
+            FGetCollisionProfileName GetCollisionProfileNameArgs{};
+            UFunctionUtils::TryCallUFunction(MeshComponents[0], STR("GetCollisionProfileName"), &GetCollisionProfileNameArgs);
+            FSetCollisionProfileName SetCollisionProfileNameArgs{GetCollisionProfileNameArgs.ReturnValue};
+            UFunctionUtils::TryCallUFunction(MeshComponents[0], STR("SetCollisionProfileName"), &SetCollisionProfileNameArgs);
+
+            // Add new unique HISM to array
+            UniqueHismArray.Add(ComponentArgs.ReturnValue);
+
+            // Add unique mesh to unique meshes
+            UniqueMeshes.Add(UniqueMesh);
+        }
+
+        // Find HISM with current static mesh actor's mesh and materials
+        UActorComponent* CurrentHism{};
+        for (const auto& UniqueHism : UniqueHismArray)
+        {
+            FGetMaterials GetCurrentMaterialsArgs{};
+            UFunctionUtils::TryCallUFunction(UniqueHism, STR("GetMaterials"), &GetCurrentMaterialsArgs);
+            if (StaticMesh == *UniqueHism->GetValuePtrByPropertyNameInChain<UObject*>(STR("StaticMesh")) && UniqueMesh.Materials == GetCurrentMaterialsArgs.
+                ReturnValue)
+            {
+                CurrentHism = UniqueHism;
+                break;
+            }
+        }
+        if (!CurrentHism)
+        {
+            Output::send<LogLevel::Warning>(STR("[Optimizer] Current HISM not found!\n"));
+            break;
+        }
 
         const FTransform InstanceTransform = MeshActor->GetTransform();
         FAddInstance InstanceArgs{InstanceTransform};
-        UFunctionUtils::TryCallUFunction(NewHism, STR("AddInstanceWorldSpace"), &InstanceArgs);
+        UFunctionUtils::TryCallUFunction(CurrentHism, STR("AddInstanceWorldSpace"), &InstanceArgs);
+        HismInstances++;
 
         if (MeshActor != MainMeshActor) MeshActor->K2_DestroyActor();
     }
 
+    // Check unique HISM
+    Output::send<LogLevel::Default>(STR("[Optimizer] Unique HISM: {}\n"), UniqueHismArray.Num());
+    Output::send<LogLevel::Default>(STR("[Optimizer] Total HISM instances: {}\n"), HismInstances);
+
     // Check last static mesh actors
     MeshActors.Empty();
     UGameplayStatics::GetAllActorsOfClass(ContextActor, MeshActorClass, MeshActors);
-    Output::send<LogLevel::Default>(STR("[Optimizer] Mesh actors count: {}\n"), MeshActors.Num());
+    Output::send<LogLevel::Default>(STR("[Optimizer] Static mesh actors after optimizing: {}\n"), MeshActors.Num());
 }

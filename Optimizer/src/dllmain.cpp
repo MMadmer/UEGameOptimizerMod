@@ -13,7 +13,7 @@ class Optimizer final : public CppUserModBase
 public:
     Optimizer()
     {
-        ModName = STR("SmutaOptimizer");
+        ModName = STR("UEGameOptimizer");
         ModVersion = STR("1.0");
         ModDescription = STR("Target of this mod is video memory and RAM optimizing.");
         ModAuthors = STR("Madmer");

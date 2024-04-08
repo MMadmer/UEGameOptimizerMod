@@ -8,7 +8,33 @@ struct FAddComponentByClass
     bool bManualAttachment;
     Unreal::FTransform Transform;
     bool bDeferredFinish;
-    Unreal::UActorComponent* NewComponent{};
+    Unreal::UActorComponent* ReturnValue{};
+};
+
+/** virtual bool USceneComponent::IsVisible() const*/
+struct FIsVisible
+{
+    bool ReturnValue{};
+};
+
+/** void USceneComponent::SetVisibility(bool bNewVisibility, bool bPropagateToChildren=false)*/
+struct FSetVisibility
+{
+    bool bNewVisibility;
+    bool bPropagateToChildren{false};
+};
+
+/** FName USceneComponent::GetCollisionProfileName() const*/
+struct FGetCollisionProfileName
+{
+    FName ReturnValue{};
+};
+
+/** virtual void USceneComponent::SetCollisionProfileName(FName InCollisionProfileName, bool bUpdateOverlaps=true)*/
+struct FSetCollisionProfileName
+{
+    FName InCollisionProfileName;
+    bool bUpdateOverlaps{true};
 };
 
 /** FTransform USceneComponent::K2_GetComponentToWorld() const*/
@@ -21,6 +47,19 @@ struct FK2_GetComponentToWorld
 struct FSetWorldScale3D
 {
     Unreal::FVector NewScale;
+};
+
+/** virtual TArray<class UMaterialInterface*> GetMaterials() const*/
+struct FGetMaterials
+{
+    TArray<UObject*> ReturnValue{};
+};
+
+/** virtual void UPrimitiveComponent::SetMaterial(int32 ElementIndex, class UMaterialInterface* Material);*/
+struct FSetMaterial
+{
+    Unreal::int32 ElementIndex;
+    UObject* Material;
 };
 
 /** UStaticMeshComponent::SetStaticMesh(UStaticMesh* NewMesh)*/
