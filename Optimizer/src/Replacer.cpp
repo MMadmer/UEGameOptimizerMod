@@ -145,7 +145,7 @@ void Replacer::ConvertMeshToHism()
             FGetCollisionProfileName GetCollisionProfileNameArgs{};
             UFunctionUtils::TryCallUFunction(MeshComponents[0], STR("GetCollisionProfileName"), &GetCollisionProfileNameArgs);
             FSetCollisionProfileName SetCollisionProfileNameArgs{GetCollisionProfileNameArgs.ReturnValue};
-            UFunctionUtils::TryCallUFunction(MeshComponents[0], STR("SetCollisionProfileName"), &SetCollisionProfileNameArgs);
+            UFunctionUtils::TryCallUFunction(ComponentArgs.ReturnValue, STR("SetCollisionProfileName"), &SetCollisionProfileNameArgs);
 
             // Add new unique HISM to array
             UniqueHismArray.Add(ComponentArgs.ReturnValue);
